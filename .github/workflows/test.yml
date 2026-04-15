@@ -48,7 +48,7 @@ jobs:
       - uses: trufflesecurity/trufflehog@c3e599b7163e8198a55467f3133db0e7b2a492cb # v3.93.7
         with:
           extra_args: --results=verified,unknown
-      - uses: aquasecurity/trivy-action@97e0b3872f55f89b95b2f65b3dbab56962816478 # 0.34.2
+      - uses: aquasecurity/trivy-action@264c9c5e188ea085e7377fd77abd17bfbd4e5926 # 0.34.2
         with:
           scan-type: config
           scan-ref: terraform/
