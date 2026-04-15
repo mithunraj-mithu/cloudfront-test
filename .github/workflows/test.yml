@@ -45,7 +45,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
-      - uses: trufflesecurity/trufflehog@c3e599b7163e8198a55467f3133db0e7b2a492cb # v3.93.7
+      - uses: trufflesecurity/trufflehog@47e7b7cd74f578e1e3145d48f669f22fd1330ca6 # v3.94.3
         with:
           extra_args: --results=verified,unknown
       - uses: aquasecurity/trivy-action@97e0b3872f55f89b95b2f65b3dbab56962816478 # 0.34.2
