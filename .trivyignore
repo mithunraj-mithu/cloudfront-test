@@ -1,0 +1,4 @@
+# ── CloudFront S3 Encryption ──────────────────────────────────────────────────#
+# CloudFront standard logging does not support Customer Managed Keys (SSE-KMS).
+# We must use SSE-S3 (AES256), so we ignore the recommendation to use KMS here.
+AVD-AWS-0132

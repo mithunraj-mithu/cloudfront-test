@@ -1,0 +1,10 @@
+#!/usr/bin/env sh
+
+MAX_LENGTH=120
+HEADER=$(head -1 "$1")
+
+if [ ${#HEADER} -gt $MAX_LENGTH ]; then
+  echo "ERROR: Commit header is ${#HEADER} characters (max $MAX_LENGTH)"
+  echo "Header: $HEADER"
+  exit 1
+fi
