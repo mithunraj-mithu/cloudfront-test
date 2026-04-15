@@ -1,0 +1,48 @@
+name: Destroy
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type 'destroy' to confirm"
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: terraform-production
+  cancel-in-progress: false
+
+jobs:
+  destroy:
+    name: Terraform Destroy
+    runs-on: ubuntu-latest
+    environment: production
+    if: ${{ inputs.confirm == 'destroy' }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: hashicorp/setup-terraform@5e8dbf3c6d9deaf4193ca7a8fb23f2ac83bb6c85 # v4.0.0
+      - uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7 # v6.0.0
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.PRODUCTION_ACCOUNT_ID }}:role/${{ secrets.AWS_DEPLOY_ROLE }}
+          aws-region: ap-south-1
+
+      - name: Terraform Destroy
+        run: |
+          terraform -chdir=terraform init -backend-config=backends/production.conf
+          terraform -chdir=terraform workspace select -or-create production
+          terraform -chdir=terraform destroy -var-file=workspaces/production.tfvars -no-color -auto-approve
+        env:
+          TF_VAR_aws_account_id: ${{ secrets.PRODUCTION_ACCOUNT_ID }}
+          TF_VAR_aws_region: ap-south-1
+
+      - name: Summary
+        run: |
+          echo "## Terraform Destroy — Production" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment:** production" >> $GITHUB_STEP_SUMMARY
+          echo "- **Triggered by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** completed" >> $GITHUB_STEP_SUMMARY
