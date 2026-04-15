@@ -1,0 +1,82 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - ".github/workflows/**"
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  release:
+    name: Tag and Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Determine next version
+        id: semver
+        continue-on-error: true # allow job to continue so Summary can report the failure; success check on later steps prevents use of missing outputs
+        uses: ietf-tools/semver-action@c90370b2958652d71c06a3484129a4d423a6d8a8 # v1.11.0
+        with:
+          token: ${{ github.token }}
+          branch: main
+          noVersionBumpBehavior: warn
+          noNewCommitBehavior: warn
+
+      - name: Push tag
+        if: steps.semver.outcome == 'success' && steps.semver.outputs.bump != 'none'
+        run: |
+          git tag ${{ steps.semver.outputs.next }}
+          git push origin ${{ steps.semver.outputs.next }}
+
+      - name: Generate changelog
+        if: steps.semver.outcome == 'success' && steps.semver.outputs.bump != 'none'
+        id: changelog
+        uses: requarks/changelog-action@b78a3354a01f4a1affb484b9264b506a815c46b1 # v1.10.3
+        with:
+          token: ${{ github.token }}
+          tag: ${{ steps.semver.outputs.next }}
+          writeToFile: false
+
+      - name: Create GitHub Release
+        if: steps.semver.outcome == 'success' && steps.semver.outputs.bump != 'none'
+        uses: ncipollo/release-action@b7eabc95ff50cbeeedec83973935c8f306dfcd0b # v1.20.0
+        with:
+          tag: ${{ steps.semver.outputs.next }}
+          name: ${{ steps.semver.outputs.next }}
+          body: ${{ steps.changelog.outputs.changes }}
+          makeLatest: true
+          token: ${{ github.token }}
+
+      - name: Deploy to production
+        if: steps.semver.outcome == 'success' && steps.semver.outputs.bump != 'none'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run production.yml -f tag=${{ steps.semver.outputs.next }}
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Release" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.semver.outcome }}" != "success" ]; then
+            echo "> **No release** — version detection failed" >> "$GITHUB_STEP_SUMMARY"
+          elif [ "${{ steps.semver.outputs.bump }}" = "none" ]; then
+            echo "> **No release** — no version bump required" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Detail | Value |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| ------ | ----- |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| **Current version** | \`${{ steps.semver.outputs.current }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "| Detail | Value |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| ------ | ----- |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| **Bump type** | \`${{ steps.semver.outputs.bump }}\` |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| **Previous version** | \`${{ steps.semver.outputs.current }}\` |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| **New version** | \`${{ steps.semver.outputs.next }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          fi
