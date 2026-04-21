@@ -1,3 +1,5 @@
+# outputs.tf
+
 output "labs_url" {
   description = "Public base URL for Alamy Labs."
   value       = "https://${local.labs_fqdn}"
@@ -23,14 +25,14 @@ output "route53_zone_id" {
   value       = data.aws_route53_zone.main.zone_id
 }
 
-output "cloudfront_log_bucket" {
-  description = "S3 bucket for CloudFront access logs."
-  value       = aws_s3_bucket.cloudfront_logs.bucket
+output "cloudfront_log_group" {
+  description = "CloudWatch Log Group name for CloudFront access logs (always in us-east-1)."
+  value       = aws_cloudwatch_log_group.cloudfront_logs.name
 }
 
-output "kms_key_arn" {
-  description = "KMS key ARN used to encrypt the log bucket."
-  value       = aws_kms_key.cloudfront_logs.arn
+output "default_origin_bucket" {
+  description = "S3 bucket name for the default (catch-all) origin."
+  value       = aws_s3_bucket.default_origin.bucket
 }
 
 output "application_urls" {

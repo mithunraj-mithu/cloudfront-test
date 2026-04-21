@@ -12,9 +12,9 @@ resource "aws_acm_certificate" "labs" {
     create_before_destroy = true
   }
 
-  tags = merge(var.tags, {
+  tags = {
     Name = "${var.service}-certificate"
-  })
+  }
 }
 
 # DNS validation records written to Route 53 automatically.

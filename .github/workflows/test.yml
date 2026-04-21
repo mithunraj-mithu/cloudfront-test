@@ -3,7 +3,6 @@ name: Test
 on:
   push:
     branches: [main]
-
 permissions:
   contents: read
   pull-requests: read
@@ -28,7 +27,7 @@ jobs:
       - run: terraform -chdir=terraform validate
       - run: terraform fmt -check -recursive terraform/
 
-      - uses: terraform-linters/setup-tflint@4cb9feea73331a35b422df102992a03a44a3bb33 # v6.2.1
+      - uses: terraform-linters/setup-tflint@4cb9feea73331a35b422df102992a03a44a3bb33 ## v6.2.1
 
       - name: Init TFLint
         run: tflint --init

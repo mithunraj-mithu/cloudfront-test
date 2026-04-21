@@ -2,13 +2,14 @@
 
 ## Status
 
-Proposed — 2026-04-20 (Updated to reflect Trivy-compliant S3 logging)
+Accepted — 2026-04-20  
+Updated — 2026-04-22 (S3 OAC default origin; `s3_force_destroy`, `log_retention_days` variables; lifecycle rule; static asset path; versions.tf consolidation)
 
 ---
 
 ## Context
 
-The Alamy Labs infrastructure provisions a CloudFront reverse proxy and its supporting resources (ACM, Route 53, S3, IAM) using Terraform. This ADR establishes the conventions that govern how this Terraform project is structured, versioned, and executed. It does not cover the CloudFront architecture itself — see [ADR-0002](0002-cloudfront-architecture-overview.md).
+The Alamy Labs infrastructure provisions a CloudFront reverse proxy and its supporting resources (ACM, Route 53, S3, CloudWatch Logs, KMS) using Terraform. This ADR covers project structure, versioning, state, and execution conventions. CloudFront architecture is in [ADR-0002](0002-cloudfront-architecture-overview.md).
 
 ---
 
@@ -16,53 +17,53 @@ The Alamy Labs infrastructure provisions a CloudFront reverse proxy and its supp
 
 ### 1. File layout
 
-The `terraform/` directory uses a flat structure. Each file owns one AWS service or logical concern:
+Flat structure under `terraform/`. Each file owns one AWS service or logical concern. There is no `main.tf`.
 
 | File | Responsibility |
 |---|---|
-| `cloudfront.tf` | Distribution, origin request policy, cache policy |
+| `cloudfront.tf` | Distribution, OAC, origin request policy, cache policy |
 | `acm.tf` | TLS certificate lifecycle (us-east-1 provider alias) |
-| `r53.tf` | Route 53 ALIAS records |
-| `s3.tf` | S3 bucket for access logs (fully locked down, `BucketOwnerEnforced`) |
-| `iam.tf` | Resource-based policies (S3 bucket policy for CloudFront delivery) |
-| `data.tf` | Read-only data sources |
-| `locals.tf` | Computed locals (`labs_fqdn`, `app_names`) |
+| `r53.tf` | Route 53 A + AAAA ALIAS records |
+| `s3.tf` | Default-origin bucket, public-access block, versioning, encryption, lifecycle, bucket policy, `index.html` object |
+| `cloudwatch.tf` | Log Group, delivery destination, delivery source, delivery link |
+| `kms.tf` | CMK and alias for Log Group encryption |
+| `data.tf` | Read-only data sources and IAM policy documents |
+| `locals.tf` | Computed local `labs_fqdn` |
 | `variables.tf` | All input variable declarations with validation |
 | `outputs.tf` | Stack outputs |
-| `providers.tf` | Provider configuration, default tags, S3 backend |
-| `versions.tf` | Terraform core and provider version constraints |
-
-There is no `main.tf`. Grouping by service makes it unambiguous where any given resource lives.
+| `providers.tf` | Provider configuration, default tags, S3 backend, provider version constraints |
+| `versions.tf` | Terraform core version constraint |
+| `static/index.html` | Holding page served for unmatched paths |
 
 ### 2. Version constraints
 
-`versions.tf` declares the Terraform core constraint:
+`versions.tf` pins the Terraform core version:
 
 ```hcl
 terraform {
-  required_version = ">= 1.0.0, < 2.0.0"
+  required_version = ">= 1.9.0, < 2.0.0"
 }
 ```
 
-The AWS provider is pinned in `providers.tf` using the pessimistic constraint operator:
+`providers.tf` pins the AWS provider with the pessimistic constraint operator, permitting patch releases only:
 
 ```hcl
 aws = {
   source  = "hashicorp/aws"
-  version = "~> 5.82.0"
+  version = "~> 5.94.0"
 }
 ```
 
-`~> 5.82.0` permits patch releases (`5.82.x`) but blocks minor and major version bumps, preventing silent API surface changes while still picking up security patches. There is no committed `.terraform.lock.hcl`; the CI pipeline runs `terraform init -upgrade` on each run, resolving the dependency tree dynamically within the stated constraints.
+The two `terraform {}` blocks (one in `versions.tf`, one in `providers.tf`) are merged at init time by Terraform and are intentionally split by concern. No `.terraform.lock.hcl` is committed. CI runs `terraform init -upgrade` on each execution, resolving the dependency tree within declared constraints.
 
 ### 3. Provider configuration
 
-Two AWS provider instances are declared in `providers.tf`:
+Two provider instances are declared in `providers.tf`:
 
-- `aws` — primary region (`eu-west-1` by default, overridable via `var.region`). Used for all resources except ACM.
-- `aws.us_east_1` — alias locked to `us-east-1`. Used exclusively by `acm.tf`, because CloudFront only accepts certificates provisioned in that region.
+- `aws` — primary region (`var.region`, defaults to `eu-west-1`). Used for all resources except ACM, CloudWatch Logs, KMS, and S3 (S3 bucket itself uses the primary region, but the log delivery resources require `us-east-1`).
+- `aws.us_east_1` — alias locked to `us-east-1`. Used by `acm.tf`, `cloudwatch.tf`, and `kms.tf`. CloudFront is a global service and its Standard Logging v2 delivery chain (`ACCESS_LOGS` log type) is only supported in `us-east-1`; the Log Group and CMK must reside in the same region.
 
-Both providers share identical `default_tags`:
+Both share the same `default_tags`:
 
 ```hcl
 default_tags {
@@ -77,11 +78,11 @@ default_tags {
 }
 ```
 
-Resource-level `tags` blocks use `merge(var.tags, { Name = "..." })` to layer a `Name` tag and any caller-supplied extras on top of the defaults.
+Resource-level `tags` blocks contain only `{ Name = "..." }`. No `merge()` or `var.tags` is needed.
 
 ### 4. State management
 
-State is stored remotely in S3 with DynamoDB locking:
+Remote state in S3 with DynamoDB locking:
 
 ```hcl
 backend "s3" {
@@ -89,93 +90,108 @@ backend "s3" {
 }
 ```
 
-`encrypt = true` enables AES-256 SSE on the state file. The bucket name, key path, and DynamoDB table are injected at init time from the backend config file in `backends/`. This stack targets a single production workspace.
+`encrypt = true` enables AES-256 SSE on the state file. Bucket, key path, and DynamoDB table are injected at init time from `backends/`. Single production workspace.
 
 ### 5. Variable validation
 
-All variables that accept free-form strings are guarded by `validation` blocks. Key rules:
-
 | Variable | Constraint |
 |---|---|
-| `labs_subdomain` | `^[a-z0-9-]+$` — lowercase alphanumeric and hyphens only |
-| `default_origin_domain` | Valid hostname, no protocol prefix |
+| `labs_subdomain` | `^[a-z0-9-]+$` |
 | `cloudfront_price_class` | Enum: `PriceClass_100`, `PriceClass_200`, `PriceClass_All` |
 | `labs_applications` keys | `^[a-z0-9-]+$` |
 | `labs_applications[*].origin_domain` | Valid hostname, no protocol prefix |
+| `log_retention_days` | Valid CloudWatch Logs retention integer |
 
-Validation runs at plan time, producing a descriptive error before any API call is made.
+Validation runs at plan time, before any API call.
 
 ### 6. Locals
 
-`locals.tf` centralises computed values:
+`locals.tf` defines the single source of truth for the public domain:
 
 ```hcl
 locals {
-  labs_fqdn = "${var.labs_subdomain}.${var.hosted_zone_name}"  # → labs.alamy.com
-  app_names = sort(keys(var.labs_applications))
+  labs_fqdn = "${var.labs_subdomain}.${var.hosted_zone_name}"
 }
 ```
 
-`labs_fqdn` is the single source of truth for the domain string used in the certificate, CloudFront alias, Route 53 records, and the `X-Forwarded-Host` custom header. `app_names` provides a sorted list used in outputs.
+`labs_fqdn` is consumed by ACM, CloudFront aliases, Route 53 records, and the `X-Forwarded-Host` custom header.
 
 ### 7. Data sources
 
-`data.tf` looks up the `alamy.com` hosted zone by name:
+`data.tf` contains all read-only data sources and IAM policy documents:
 
-```hcl
-data "aws_route53_zone" "main" {
-  name         = var.hosted_zone_name
-  private_zone = false
-}
-```
-
-The hosted zone is shared infrastructure managed outside this stack. Using a data source (rather than a resource) ensures this stack can never accidentally destroy it.
+- `aws_route53_zone.main` — looks up the hosted zone by name; a data source ensures this stack cannot destroy it.
+- `aws_caller_identity.current` — resolves the account ID for KMS key policy ARNs, IAM condition values, and the S3 bucket policy.
+- `aws_iam_policy_document.cloudwatch_kms` — KMS key policy granting the account root and the CloudWatch Logs service (`logs.us-east-1.amazonaws.com`) permission to use the CMK, scoped to the specific log group ARN via `kms:EncryptionContext:aws:logs:arn`.
+- `aws_iam_policy_document.default_origin_bucket` — S3 bucket policy granting CloudFront OAC `s3:GetObject` access, scoped to this distribution ARN via `AWS:SourceArn`.
 
 ### 8. ACM certificate lifecycle
 
-`acm.tf` provisions the TLS certificate with `create_before_destroy = true`, allowing certificate rotation without downtime. DNS validation records are written to Route 53 automatically via a `for_each` over `domain_validation_options`. The `aws_acm_certificate_validation` resource blocks the apply from completing until the certificate reaches `ISSUED` status.
+`acm.tf` provisions the TLS certificate with `create_before_destroy = true`. DNS validation records are written to Route 53 via `for_each` over `domain_validation_options`. `aws_acm_certificate_validation` blocks apply completion until the certificate reaches `ISSUED` status.
 
-### 9. Outputs
+### 9. Default origin — S3 with OAC
 
-`outputs.tf` exposes the following:
+The CloudFront default (catch-all) behaviour is backed by an S3 bucket rather than an external origin. This ensures a reliable, controlled holding page is returned for all unmatched paths.
+
+`s3.tf` provisions:
+
+- **`aws_s3_bucket`** — `${service}-default-origin-${workspace}`. `force_destroy` controlled by `var.s3_force_destroy` (default `false`; set `true` only in non-production workspaces).
+- **`aws_s3_bucket_public_access_block`** — all four block settings enabled; no public access.
+- **`aws_s3_bucket_versioning`** — enabled; required for lifecycle non-current version expiry.
+- **`aws_s3_bucket_server_side_encryption_configuration`** — AES-256 SSE.
+- **`aws_s3_bucket_lifecycle_configuration`** — expires non-current versions after 30 days; aborts incomplete multipart uploads after 7 days.
+- **`aws_s3_bucket_policy`** — grants CloudFront OAC `s3:GetObject` scoped to this distribution (see `data.tf`).
+- **`aws_s3_object`** — uploads `static/index.html` as the holding page (key: `index.html`, `content_type: text/html`, tracked via `etag`).
+
+`cloudfront.tf` provisions `aws_cloudfront_origin_access_control` (`sigv4`, `always` signing) and references the bucket's regional domain name as the default origin. CloudFront custom error responses map S3 `403` and `404` responses to `index.html` with HTTP `404`, with `error_caching_min_ttl = 0`.
+
+The static holding page source is `terraform/static/index.html`. This file must exist before `terraform apply`.
+
+### 10. Outputs
 
 | Output | Description |
 |---|---|
 | `labs_url` | Public base URL |
 | `cloudfront_distribution_id` | Used for cache invalidations |
-| `cloudfront_domain_name` | The `*.cloudfront.net` domain |
+| `cloudfront_domain_name` | `*.cloudfront.net` domain |
 | `acm_certificate_arn` | Certificate ARN |
 | `route53_zone_id` | Hosted zone ID |
-| `cloudfront_log_bucket` | S3 bucket name for access logs |
+| `cloudfront_log_group` | CloudWatch Log Group name (always in us-east-1) |
+| `default_origin_bucket` | S3 bucket name for the catch-all origin |
 | `application_urls` | `map(string)` of app name → full public URL |
 
-### 10. CI/CD and execution policy
+### 11. CI/CD
 
-Terraform is executed exclusively via GitHub Actions. Manual plan or apply runs are prohibited to prevent state drift. The pipeline uses short-lived credentials via `sts:AssumeRole` against a GitHub Environment-scoped IAM role (`production`). No IAM users or static access keys are provisioned.
+Terraform runs exclusively in GitHub Actions via short-lived credentials (`sts:AssumeRole`, `production` GitHub Environment). Manual runs are prohibited.
 
-The four workflows and their roles:
-
-| Workflow | Trigger | Terraform action |
+| Workflow | Trigger | Action |
 |---|---|---|
-| `test.yml` | PR → main | `init -backend=false`, `validate`, `fmt -check`, TFLint |
-| `plan.yml` | PR → main (`terraform/**` paths) | `plan` against production workspace; result posted as sticky PR comment |
-| `release.yml` | Push to main | No Terraform — creates semver tag, GitHub Release, triggers `production.yml` |
-| `production.yml` | Triggered by `release.yml` or manual `workflow_dispatch` | `apply` against production workspace |
+| `test.yml` | PR → main | `init -backend=false`, `validate`, `fmt -check`, TFLint, TruffleHog, Trivy |
+| `plan.yml` | PR → main (`terraform/**`) | `plan` against production; result posted as sticky PR comment |
+| `release.yml` | Push to main | Creates semver tag + GitHub Release; triggers `production.yml` |
+| `production.yml` | Triggered by `release.yml` or `workflow_dispatch` | `apply` against production |
 
-Security scanning runs in `test.yml` alongside linting: TruffleHog scans for leaked secrets, Trivy scans Terraform config for `HIGH` and `CRITICAL` severity misconfigurations. The S3 logging architecture explicitly uses modern standard delivery (no ACLs, `BucketOwnerEnforced`, SSE-S3) to ensure 100% native Trivy compliance without requiring `.trivyignore` suppressions.
+Trivy scans for `HIGH` and `CRITICAL` severity misconfigurations. One suppression is active — see `.trivyignore`.
 
-### 11. Access logging: S3 over CloudWatch Logs
+### 12. Access logging
 
-CloudFront access logs are delivered to S3 (`s3.tf`) rather than CloudWatch Logs. AWS recently released CloudFront Standard Logging v2, which adds native delivery directly to a CloudWatch Log Group — removing the need for an S3 bucket entirely. This was considered and rejected for the following reasons.
+CloudFront Standard Logging v2 delivers access logs to CloudWatch Logs via three resources in `cloudwatch.tf`, all using `provider = aws.us_east_1`:
 
-CloudWatch Logs v2 was considered but rejected primarily on cost — ingestion is ~$0.50/GB versus fractions of a penny for S3. Any long-term retention requirement would also force a secondary Kinesis Firehose pipeline back to S3 Glacier anyway, negating the simplicity gain. S3 delivery is cheaper, equally Trivy-compliant, and sufficient for a POC proxy.
+- `aws_cloudwatch_log_delivery_source` — registers the CloudFront distribution as a log source (`ACCESS_LOGS`).
+- `aws_cloudwatch_log_delivery_destination` — registers the Log Group as the delivery target.
+- `aws_cloudwatch_log_delivery` — wires source to destination.
+
+The `ACCESS_LOGS` log type is only supported in `us-east-1`. The Log Group and CMK (`kms.tf`) are therefore also provisioned in `us-east-1` via the same provider alias. Retention is configurable via `var.log_retention_days` (default 30 days). The Log Group is encrypted with the CMK (`enable_key_rotation = true`, 7-day deletion window).
+
+When troubleshooting, query logs in the `us-east-1` region — the Log Group `/aws/cloudfront/labs-{workspace}` will not appear in the console or CLI if the selected region is anything other than `us-east-1`.
 
 ---
 
 ## Consequences
 
-- The flat file layout scales to ~10–15 files before module extraction becomes necessary. Extract to modules when a second independently deployable stack needs to reuse any of these resources.
-- The absence of a committed lock file means provider resolution happens on every CI run. If reproducible builds become a hard requirement, commit `.terraform.lock.hcl` and remove `-upgrade`.
-- `create_before_destroy` on the ACM certificate means two certificates will briefly coexist in ACM during rotation. This is expected and does not affect availability.
-- Keeping `versions.tf` separate from `providers.tf` makes it straightforward to locate and update the Terraform core constraint without touching provider configuration.
-- Standardising on SSE-S3 for logging buckets prevents KMS-related delivery failures while maintaining compliance with Trivy standards.
+- The flat layout scales to ~10–15 files before module extraction is warranted. Extract when a second independently deployable stack needs to reuse any of these resources.
+- No committed lock file means provider resolution runs on every CI execution. Commit `.terraform.lock.hcl` and remove `-upgrade` if reproducible builds become a hard requirement.
+- `create_before_destroy` on the ACM certificate means two certificates briefly coexist in ACM during rotation. This is expected and does not affect availability.
+- Destroy the Log Group before the KMS key. Deleting the key first causes delivery failures during the 7-day deletion window.
+- `var.s3_force_destroy` defaults to `false`. Attempting to destroy the stack in production while the bucket is non-empty will fail safely. Set `true` only in ephemeral (dev/staging) workspaces.
+- The `static/index.html` file must exist at plan and apply time. The `filemd5()` call in `s3.tf` will fail if the file is absent.

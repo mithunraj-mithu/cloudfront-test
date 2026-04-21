@@ -17,15 +17,6 @@ region           = "ap-south-1"
 hosted_zone_name = "mithunpp4u.shop"
 labs_subdomain   = "labs"
 
-# Fallback origin for paths that don't match any application.
-# Replace with a real static-site or S3 website endpoint.
-default_origin_domain = "labs-default.alamy.com"
-
-# Optional extra tags merged on top of provider default_tags.
-tags = {
-  CostCentre = "engineering"
-}
-
 # -----------------------------------------------------------------------------
 # POC Applications
 #
@@ -35,7 +26,5 @@ tags = {
 # Result: https://labs.alamy.com/{key}/  →  https://{origin_domain}/
 # -----------------------------------------------------------------------------
 labs_applications = {
-   vercel-credit = { origin_domain = "credit-packs-poc.vercel.app" }
+  vercel-credit = { origin_domain = "credit-packs-poc.vercel.app" }
 }
-
-

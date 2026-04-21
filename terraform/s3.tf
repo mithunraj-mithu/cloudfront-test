@@ -1,47 +1,37 @@
-# S3 bucket for CloudFront Standard Logs
+# s3.tf
 #
-# Delivery model (Modernized): ACLs are fully disabled via BucketOwnerEnforced.
-# The bucket is locked down completely (all Public Access Blocks = true).
-# Delivery is permitted explicitly by the AllowCloudFrontStandardLogDelivery 
-# statement in the bucket policy (iam.tf).
+# S3 bucket serving the default (catch-all) origin for unmatched paths.
+# Access is restricted to CloudFront via Origin Access Control — no public access.
+# The holding page (static/index.html) is uploaded as an S3 object.
 
-resource "aws_s3_bucket" "cloudfront_logs" {
-  bucket = "${var.service}-cloudfront-logs-${terraform.workspace}"
+resource "aws_s3_bucket" "default_origin" {
+  bucket        = "${var.service}-default-origin-${terraform.workspace}"
+  force_destroy = var.s3_force_destroy
 
-  # Production: prevent accidental destruction of audit logs.
-  force_destroy = false
-
-  tags = merge(var.tags, {
-    Name        = "${var.service}-cloudfront-logs"
-    Environment = terraform.workspace
-    Purpose     = "cloudfront-access-logs"
-  })
-}
-
-# ── Public access block ─────────────────
-resource "aws_s3_bucket_public_access_block" "cloudfront_logs" {
-  bucket                  = aws_s3_bucket.cloudfront_logs.id
-  block_public_acls       = true 
-  ignore_public_acls      = true 
-  block_public_policy     = true
-  restrict_public_buckets = true
-}
-
-# ── Ownership ───────────────────
-# Disables ACLs completely. All objects are owned by the bucket owner.
-resource "aws_s3_bucket_ownership_controls" "cloudfront_logs" {
-  bucket = aws_s3_bucket.cloudfront_logs.id
-
-  rule {
-    object_ownership = "BucketOwnerEnforced"
+  tags = {
+    Name = "${var.service}-default-origin"
   }
 }
 
-# ── Server-side encryption (SSE-S3 / AES-256) ────────────────────────────────
-# Note: CloudFront standard logging still does NOT support SSE-KMS, even with 
-# the modern IAM delivery. SSE-S3 is natively used.
-resource "aws_s3_bucket_server_side_encryption_configuration" "cloudfront_logs" {
-  bucket = aws_s3_bucket.cloudfront_logs.id
+resource "aws_s3_bucket_public_access_block" "default_origin" {
+  bucket = aws_s3_bucket.default_origin.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_versioning" "default_origin" {
+  bucket = aws_s3_bucket.default_origin.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "default_origin" {
+  bucket = aws_s3_bucket.default_origin.id
 
   rule {
     apply_server_side_encryption_by_default {
@@ -50,56 +40,42 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "cloudfront_logs" 
   }
 }
 
-# ── Versioning ────────────────────────────────────────────────────────────────
-resource "aws_s3_bucket_versioning" "cloudfront_logs" {
-  bucket = aws_s3_bucket.cloudfront_logs.id
-
-  versioning_configuration {
-    status = "Enabled"
-  }
-}
-
-# ── Lifecycle ─────────────────────────────────────────────────────────────────
-resource "aws_s3_bucket_lifecycle_configuration" "cloudfront_logs" {
-  bucket = aws_s3_bucket.cloudfront_logs.id
-  depends_on = [aws_s3_bucket_versioning.cloudfront_logs]
+# Expire non-current versions after 30 days.
+resource "aws_s3_bucket_lifecycle_configuration" "default_origin" {
+  bucket = aws_s3_bucket.default_origin.id
 
   rule {
-    id     = "log-tiering"
+    id     = "expire-noncurrent-versions"
     status = "Enabled"
-    filter {}
-    transition {
-      days          = 30
-      storage_class = "STANDARD_IA"
-    }
-    transition {
-      days          = 90
-      storage_class = "GLACIER_IR"
-    }
-    expiration {
-      days = 365
-    }
-  }
 
-  rule {
-    id     = "noncurrent-version-expiry"
-    status = "Enabled"
-    filter {}
-    noncurrent_version_transition {
-      noncurrent_days = 30
-      storage_class   = "STANDARD_IA"
-    }
     noncurrent_version_expiration {
-      noncurrent_days = 90
+      noncurrent_days = 30
     }
-  }
 
-  rule {
-    id     = "abort-incomplete-mpu"
-    status = "Enabled"
-    filter {}
     abort_incomplete_multipart_upload {
       days_after_initiation = 7
     }
+  }
+}
+
+# Bucket policy — grants CloudFront OAC read access only.
+resource "aws_s3_bucket_policy" "default_origin" {
+  bucket = aws_s3_bucket.default_origin.id
+  policy = data.aws_iam_policy_document.default_origin_bucket.json
+
+  depends_on = [aws_s3_bucket_public_access_block.default_origin]
+}
+
+# Holding page — returned for all unmatched paths via CloudFront custom error response.
+# Source file lives at terraform/static/index.html relative to this module root.
+resource "aws_s3_object" "default_origin_index" {
+  bucket       = aws_s3_bucket.default_origin.id
+  key          = "index.html"
+  source       = "${path.module}/static/index.html"
+  content_type = "text/html"
+  etag         = filemd5("${path.module}/static/index.html")
+
+  tags = {
+    Name = "${var.service}-default-origin-index"
   }
 }

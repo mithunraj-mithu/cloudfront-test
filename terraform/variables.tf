@@ -1,19 +1,18 @@
+# variables.tf
+#
+# All input variable declarations with validation.
+# No variable should be read directly from a provider or data source here.
+
 variable "region" {
   type        = string
   default     = "eu-west-1"
-  description = "Primary AWS region. ACM is always provisioned in us-east-1 via provider alias."
+  description = "Primary AWS region. ACM, CloudWatch Logs, and KMS are always provisioned in us-east-1 via provider alias."
 }
 
 variable "service" {
   type        = string
   default     = "alamy-labs"
   description = "Service identifier used in resource names and tags."
-}
-
-variable "tags" {
-  type        = map(string)
-  default     = {}
-  description = "Additional tags merged with provider default_tags."
 }
 
 variable "hosted_zone_name" {
@@ -33,16 +32,6 @@ variable "labs_subdomain" {
   }
 }
 
-variable "default_origin_domain" {
-  type        = string
-  description = "Fallback origin hostname for unmatched paths. No protocol prefix."
-
-  validation {
-    condition     = can(regex("^[a-zA-Z0-9][a-zA-Z0-9\\-\\.]+[a-zA-Z0-9]$", var.default_origin_domain))
-    error_message = "Must be a valid hostname without a protocol prefix."
-  }
-}
-
 variable "cloudfront_price_class" {
   type        = string
   default     = "PriceClass_100"
@@ -56,7 +45,7 @@ variable "cloudfront_price_class" {
 
 # Map of app name → external origin hostname.
 # Each key creates a CloudFront origin and ordered cache behaviour.
-# labs.alamy.com/{key}/* → https://{origin_domain}/*
+# labs.alamy.com/{key}/* → https://{origin_domain}/{key}/*
 #
 # Example:
 #   labs_applications = {
@@ -77,5 +66,22 @@ variable "labs_applications" {
   validation {
     condition     = alltrue([for k, v in var.labs_applications : can(regex("^[a-zA-Z0-9][a-zA-Z0-9\\-\\.]+[a-zA-Z0-9]$", v.origin_domain))])
     error_message = "origin_domain values must be valid hostnames without a protocol prefix."
+  }
+}
+
+variable "s3_force_destroy" {
+  type        = bool
+  default     = false
+  description = "Allow Terraform to destroy the default-origin S3 bucket even if it contains objects. Set true only for non-production workspaces."
+}
+
+variable "log_retention_days" {
+  type        = number
+  default     = 30
+  description = "CloudWatch Log Group retention in days for CloudFront access logs."
+
+  validation {
+    condition     = contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653], var.log_retention_days)
+    error_message = "Must be a valid CloudWatch Logs retention period."
   }
 }

@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<!--
+  Default 404 page for labs.alamy.com.
+
+  Served by the CloudFront default origin (default_origin_domain) when an
+  incoming request path does not match any registered application behaviour.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Page not found | Alamy Labs</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:         #f5f5f5;
+      --white:      #ffffff;
+      --brand-red:  #e2001a;
+      --text:       #333333;
+      --text-muted: #767676;
+      --border:     #e0e0e0;
+      --divider:    #eeeeee;
+    }
+
+    html, body {
+      min-height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Roboto', Arial, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Header — matches Alamy's nav bar height and border ── */
+    header {
+      background: var(--white);
+      border-bottom: 1px solid var(--border);
+      height: 60px;
+      display: flex;
+      align-items: center;
+      padding: 0 24px;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      text-decoration: none;
+    }
+
+    /* SVG wordmark reproduced as text to avoid external image dependency */
+    .logo-wordmark {
+      font-size: 28px; /* Increased from 22px */
+      font-weight: 700;
+      color: #333333; /* Changed from var(--brand-red) to #333333 */
+      letter-spacing: -0.5px;
+      line-height: 1;
+    }
+
+    .logo-tag {
+      font-size: 13px; /* Increased from 11px to balance the larger wordmark */
+      font-weight: 400;
+      color: var(--text-muted);
+      letter-spacing: 0.02em;
+      padding-left: 8px;
+      border-left: 1px solid var(--border);
+      margin-left: 2px;
+      line-height: 1.2;
+    }
+
+    /* ── Page layout ── */
+    main {
+      max-width: 640px;
+      margin: 48px auto;
+      padding: 0 16px;
+    }
+
+    /* ── Card — same white card pattern as order confirm ── */
+    .card {
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: 2px;
+      padding: 40px 48px;
+    }
+
+    .card-eyebrow {
+      font-size: 11px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      margin-bottom: 16px;
+    }
+
+    .card h1 {
+      font-size: 22px;
+      font-weight: 500;
+      color: var(--text);
+      margin-bottom: 16px;
+      line-height: 1.3;
+    }
+
+    .card-divider {
+      border: none;
+      border-top: 1px solid var(--divider);
+      margin: 24px 0;
+    }
+
+    .card p {
+      font-size: 14px;
+      font-weight: 400;
+      color: var(--text-muted);
+      line-height: 1.7;
+      margin-bottom: 12px;
+    }
+
+    .card p:last-child {
+      margin-bottom: 0;
+    }
+
+    /* ── Status row — mirrors order summary row style ── */
+    .status-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 0;
+      border-top: 1px solid var(--divider);
+      margin-top: 24px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .status-code {
+      font-weight: 500;
+      color: var(--brand-red); /* Left this as brand-red for visibility, but you can change to var(--text) if you want it all grey */
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <a class="logo" href="https://www.alamy.com">
+      <span class="logo-wordmark">alamy</span>
+      <span class="logo-tag">Labs</span>
+    </a>
+  </header>
+
+  <main>
+    <div class="card">
+      <div class="card-eyebrow">labs.alamy.com</div>
+      <h1>No application found at this path.</h1>
+      <hr class="card-divider" />
+      <p>This URL does not match any registered Labs application.</p>
+      <p>Check the path, or contact the DevOps team to register a new application.</p>
+      <div class="status-row">
+        <span>labs.alamy.com</span>
+        <span class="status-code">HTTP 404</span>
+      </div>
+    </div>
+  </main>
+
+</body>
+</html>

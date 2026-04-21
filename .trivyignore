@@ -1,4 +1,13 @@
-# ── CloudFront S3 Encryption ──────────────────────────────────────────────────
-# CloudFront standard logging does not support Customer Managed Keys (SSE-KMS).
-# We must use SSE-S3 (AES256), so we ignore the recommendation to use KMS here.
+# ── CloudFront WAF (AVD-AWS-0011) ────────────────────────────────────────────
+# WAF is not attached. This distribution proxies read-only vanity URLs to
+# external platforms that enforce their own security controls. No user input,
+# authentication, or sensitive data is handled at this layer. WAF must be
+# attached before any application that accepts user input or handles sensitive
+# data is added.
+AVD-AWS-0011
+
+# ── S3 SSE-KMS (AVD-AWS-0132) ────────────────────────────────────────────────
+# The default origin S3 bucket uses SSE-S3 (AES256) rather than SSE-KMS.
+# This bucket serves a single static holding page (index.html) with no
+# sensitive content. The operational overhead of a CMK is not justified here.
 AVD-AWS-0132
